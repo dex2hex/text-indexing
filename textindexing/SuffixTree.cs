@@ -1,6 +1,6 @@
 ﻿/////////////////////////////////////////////////////////////////////
 //      File Name          : SuffixTree.cs
-//      Created            : 28 8 2013   20:54
+//      Created            : 11 9 2013   21:20
 //      Author             : Costin S
 //
 /////////////////////////////////////////////////////////////////////
@@ -39,7 +39,7 @@ namespace TextIndexing
         #region Methods
 
         bool Contains(string text);
-        bool Search(string text, out List<int> matchList);
+        IEnumerable<int> Search(string text);
 
         #endregion
     }
@@ -72,13 +72,20 @@ namespace TextIndexing
     /// <summary>
     /// Ukkonen's O(n) online suffix tree construction.
     /// </summary>
-    public class SuffixTree
+    public sealed class SuffixTree : ISuffixTree
     {
         #region C'tor
-        
+
         private SuffixTree()
         {
         }
+
+        #endregion
+
+        #region Properties
+
+        public ISuffixNode Root { get; private set; }
+        public string Text { get; private set; }
 
         #endregion
 
@@ -94,7 +101,8 @@ namespace TextIndexing
         public static ISuffixTree Create<T>(string text)
             where T : IDictionary<char, ISuffixNode>, new()
         {
-            return SuffixTreeImpl<T>.Create(text);
+            var suffixImpl = SuffixTreeImpl<T>.Create(text);
+            return suffixImpl == null ? null : new SuffixTree() { Root = suffixImpl.Root, Text = suffixImpl.Text };
         }
 
         /// <summary>
@@ -105,7 +113,45 @@ namespace TextIndexing
         /// <returns>if the argument 'text' is empty or null string, function returns null !!</returns>
         public static ISuffixTree Create(string text)
         {
-            return SuffixTreeImpl<Dictionary>.Create(text);
+            return SuffixTree.Create<Dictionary>(text);
+        }
+
+        /// <summary>
+        /// Determines whether [contains] [the specified text].
+        /// </summary>
+        /// <param name="text">The text.</param>
+        /// <returns>
+        ///   <c>true</c> if [contains] [the specified text]; otherwise, <c>false</c>.
+        /// </returns>
+        public bool Contains(string text)
+        {
+            if (!string.IsNullOrEmpty(text))
+            {
+                var matchResult = new TextMatcher(this).Match(text);
+                return (matchResult != null && matchResult.MatchedCount == text.Length);
+            }
+            else return false;
+        }
+
+        /// <summary>
+        /// Searches for specified text within the tree and returns the list of matching starting positions.
+        /// </summary>
+        /// <param name="text">The text.</param>
+        /// <param name="matchList">The match list.</param>
+        /// <returns></returns>
+        public IEnumerable<int> Search(string text)
+        {
+            if (!string.IsNullOrEmpty(text))
+            {
+                var matchResult = new TextMatcher(this).Match(text);
+
+                if (matchResult != null && matchResult.MatchingSuffixes != null && matchResult.MatchedCount == text.Length) {
+                    foreach (var suffixNode in matchResult.MatchingSuffixes)
+                    {
+                        yield return suffixNode.LeafNumber;
+                    }
+                }
+            }
         }
 
         #endregion
@@ -113,11 +159,11 @@ namespace TextIndexing
         #region Nested Classes
 
         /// <summary>
-        /// Algorithm implementation, parameterized on the collection used to store a node's children.. 
+        /// Algorithm implementation, parameterized on the collection used to store nodes' children.. 
         /// Options other than the Dictionary, SortedDictionary and SortedList considered here do exist!
         /// </summary>
         /// <typeparam name="ChildrenCollectionType">The children collection type.</typeparam>
-        private class SuffixTreeImpl<ChildrenCollectionType> : ISuffixTree
+        private class SuffixTreeImpl<ChildrenCollectionType>
             where ChildrenCollectionType : IDictionary<char, ISuffixNode>, new()
         {
             #region Fields
@@ -128,9 +174,14 @@ namespace TextIndexing
 
             #region C'tor
 
-            private SuffixTreeImpl()
+            /// <summary>
+            /// C'tor
+            /// </summary>
+            /// <param name="text"></param>
+            private SuffixTreeImpl(string text)
             {
                 this.theRoot = new SuffixNode() { Parent = null };
+                this.Text = text;
             }
 
             #endregion
@@ -138,10 +189,7 @@ namespace TextIndexing
             #region Properties
 
             public string Text
-            { get; private set; }
-
-            private int CurrentPhase
-            { get; set; }
+            { get; private set; }            
 
             public ISuffixNode Root
             {
@@ -151,268 +199,10 @@ namespace TextIndexing
                 }
             }
 
-            #endregion
+            private int CurrentPhase
+            { get; set; }
 
-            #region Private Methods
-
-            private int GetEdgeLength(IEdgeLabel e)
-            {
-                return (e.End != -1 ? e.End : this.CurrentPhase - 1) - e.Start + 1;
-            }
-
-            private char GetCharFromIndex(int index)
-            {
-                if (0 <= index && index < this.Text.Length)
-                {
-                    return this.Text[index];
-                }
-                else
-                {
-                    throw new ArgumentOutOfRangeException();
-                }
-            }
-            
-            private bool PreMatch(SuffixNode p, out SuffixNode target, out List<EdgeLabel> edges)
-            {
-                target = null;
-                edges = new List<EdgeLabel>();
-
-                Debug.Assert(p != this.theRoot);
-
-                bool goDownFromRoot = true;
-                var v = p.Parent;
-
-                if (p.Link != null)
-                {
-                    target = p.Link;
-                    edges = null;
-                    goDownFromRoot = false;
-                    return goDownFromRoot;
-                }
-
-                if (v != this.theRoot)
-                {
-                    if (v.Link == null)
-                    {
-                        var w = v.Parent;
-
-                        if (w != this.theRoot)
-                        {
-                            Debug.Assert(w.Link != null);
-
-                            edges.Add(EdgeLabel.Create(v.Edge.Start, v.Edge.End == -1 ? (this.CurrentPhase - 1) : v.Edge.End));
-                            edges.Add(EdgeLabel.Create(p.Edge.Start, p.Edge.End == -1 ? (this.CurrentPhase - 1) : p.Edge.End));
-                            target = w.Link;
-
-                            goDownFromRoot = false;
-                        }
-                    }
-                    else
-                    {                   
-                        Debug.Assert(v.Link != null);
-
-                        edges.Add(EdgeLabel.Create(p.Edge.Start, p.Edge.End == -1 ? (this.CurrentPhase - 1) : p.Edge.End));
-                        target = v.Link;
-
-                        goDownFromRoot = false;
-                    }
-                }
-
-                return goDownFromRoot;
-            }
-            
-            private bool Match(SuffixNode p, List<EdgeLabel> edges, out SuffixNode child, out int firstUnmachedEdgeIndex)
-            {
-                if (edges == null || edges.Count <= 0)
-                {
-                    throw new ArgumentException();
-                }
-
-                firstUnmachedEdgeIndex = -1;
-
-                int matchingToDo = 0;
-                for (int i = 0; i < edges.Count; i++)
-                {
-                    matchingToDo += this.GetEdgeLength(edges[i]);
-                }
-
-                int matchingDone = 0;
-                var parent = p;
-                child = null;
-
-                int matchingEdgeIndex = 0;
-                var matchingEdge = edges[matchingEdgeIndex];
-                int cursorNext = matchingEdge.Start;
-                int edgeEnd = matchingEdge.End;
-
-                child = this.TraverseEdge(parent, cursorNext);
-                var treeEdgeLen = this.GetEdgeLength(child.Edge);
-
-                do
-                {
-                    if (cursorNext + treeEdgeLen - 1 < edgeEnd)
-                    {
-                        matchingDone += treeEdgeLen;
-                        cursorNext += treeEdgeLen;
-
-                        Debug.Assert(matchingDone < matchingToDo);
-
-                        parent = child;
-                        child = this.TraverseEdge(parent, cursorNext);
-                        treeEdgeLen = this.GetEdgeLength(child.Edge);
-                    }
-                    else if (cursorNext + treeEdgeLen - 1 == edgeEnd)
-                    {
-                        matchingDone += treeEdgeLen;
-
-                        if (matchingEdgeIndex + 1 < edges.Count)
-                        {
-                            matchingEdge = edges[++matchingEdgeIndex];
-                            cursorNext = matchingEdge.Start;
-                            edgeEnd = matchingEdge.End;
-
-                            parent = child;
-                            child = this.TraverseEdge(parent, cursorNext);
-                            treeEdgeLen = this.GetEdgeLength(child.Edge);
-                        }
-                    }
-                    else
-                    {
-                        matchingDone += edgeEnd - cursorNext + 1;
-                        var deltaUnmatched = cursorNext + treeEdgeLen - 1 - edgeEnd;
-
-                        if (matchingEdgeIndex + 1 < edges.Count)
-                        {
-                            matchingEdge = edges[++matchingEdgeIndex];
-                            cursorNext = matchingEdge.Start;
-                            edgeEnd = matchingEdge.End;
-
-                            treeEdgeLen = deltaUnmatched;
-                        }
-                        else
-                        {
-                            firstUnmachedEdgeIndex = (child.Edge.End == -1 ? (this.CurrentPhase - 1) : child.Edge.End) - deltaUnmatched + 1;
-                        }
-                    }
-                }
-                while (matchingDone < matchingToDo);
-
-                return firstUnmachedEdgeIndex == -1;
-            }
-
-            private SuffixNode TraverseEdge(SuffixNode parent, int matchingStart)
-            {
-                SuffixNode child = parent.GetEdge(this.GetCharFromIndex(matchingStart));
-                if (child == null)
-                {
-                    throw new ApplicationException("unexpected!");
-                }
-
-                return child;
-            }
-
-            private void FixupLeaves(SuffixNode p, int endIndex)
-            {
-                if (!p.IsLeaf)
-                {
-                    foreach (var c in p.Children)
-                    {
-                        this.FixupLeaves(c.Value as SuffixNode, endIndex);
-                    }
-                }
-                else
-                {
-                    p.Edge.End = endIndex;
-                }
-            }
-
-            /// <summary>
-            /// Searches for the specified text.
-            /// </summary>
-            /// <param name="text">The text.</param>
-            /// <param name="matchingList">The matching list.</param>
-            /// <param name="child">The child.</param>
-            /// <param name="firstUnmachedEdgeIndex">First index of the unmached edge.</param>
-            /// <returns>number of characters successfully matched</returns>
-            private int Search(string text, ref List<ISuffixNode> matchingList, out ISuffixNode child, out int firstUnmachedEdgeIndex)
-            {
-                child = null;
-                firstUnmachedEdgeIndex = -1;
-
-                if (string.IsNullOrEmpty(text))
-                {
-                    return 0;
-                }
-
-                var parent = this.Root;
-                int length = text.Length;
-
-                int k = 0, e = -1;
-                while (parent.Children.TryGetValue(text[k], out child))
-                {
-                    e = child.Edge.Start;
-
-                    if (child.IsLeaf)
-                    {
-                        // leaves haven't been fixed up
-                        Debug.Assert(child.Edge.End != -1);
-                    }
-
-                    int end = child.Edge.End;
-
-                    while (k < length && e <= end && text[k++] == this.Text[e++]) { }
-
-                    if (k < length && e > end)
-                    {
-                        //good so far, keep going.. 
-                        parent = child;
-                        continue;
-                    }
-                    else break;
-                }
-
-		// did anything match?
-                if (k <= 0) return 0;
-
-                // did we agree on the last char?
-                if (text[k - 1] == this.Text[e - 1])
-                {
-                    if (matchingList != null)
-                    {
-                        //find all leaves below and get your matching list..
-                        var stack = new Stack<ISuffixNode>();
-                        stack.Push(child);
-
-                        matchingList = new List<ISuffixNode>();
-
-                        while (stack.Count > 0)
-                        {
-                            var p = stack.Pop();
-                            if (p.IsLeaf)
-                            {
-                                matchingList.Add(p);
-                            }
-                            else
-                            {
-                                foreach (var c in p.Children)
-                                {
-                                    stack.Push(c.Value);
-                                }
-                            }
-                        }
-                    }
-
-                    return k;
-                }
-                else
-                {
-                    //well, wish you luck next time..
-                    firstUnmachedEdgeIndex = e - 1;
-                    return k - 1;
-                }
-            }
-
-            #endregion
+            #endregion            
 
             #region Public Methods
 
@@ -423,17 +213,14 @@ namespace TextIndexing
                     return null;
                 }
 
-                var tree = new SuffixTreeImpl<ChildrenCollectionType>();
-                tree.Text = text;
-
-                var root = tree.theRoot;
-                int m = text.Length;
-
+                var tree = new SuffixTreeImpl<ChildrenCollectionType>(text);
+                var root = tree.theRoot;                
                 var deep = root.AddEdge(tree.Text, 0, -1);
                 deep.SetLeaf(0);
 
                 SuffixNode prevExtEnd = deep;
                 int lastCreatedLeaf = -1;
+                int m = text.Length;
 
                 for (int i = 1; i < m; i++)
                 {
@@ -442,14 +229,10 @@ namespace TextIndexing
                     bool skipRemaining = false;
                     SuffixNode internCreatedPrevExt = null;
 
-                    for (int j = 1; j < i && !skipRemaining; j++)
+                    int j = (lastCreatedLeaf == -1) ? 1 : lastCreatedLeaf;
+                    for (; j < i && !skipRemaining; j++)
                     {
-                        if (j < lastCreatedLeaf)
-                        {
-                            continue;
-                        }
-                        
-                        List<EdgeLabel> edges = null;
+                        IEdgeLabel[] edges = null;
                         SuffixNode found = null;
                         int edgecursor = -1;
                         bool matchEndedAtNode;
@@ -458,7 +241,7 @@ namespace TextIndexing
                         {
                             if (!prevExtEnd.IsLeaf)
                             {
-                                edges = new List<EdgeLabel>(new EdgeLabel[] { EdgeLabel.Create(i - 1, i - 1) });
+                                edges = new IEdgeLabel[] { EdgeLabel.Create(i - 1, i - 1) };
                                 matchEndedAtNode = tree.Match(prevExtEnd, edges, out found, out edgecursor);
                             }
                             else
@@ -473,7 +256,7 @@ namespace TextIndexing
                             SuffixNode target = null;
                             if (tree.PreMatch(prevExtEnd, out target, out edges))
                             {
-                                edges = new List<EdgeLabel>(new EdgeLabel[] { EdgeLabel.Create(j, i - 1) });
+                                edges = new IEdgeLabel[] { EdgeLabel.Create(j, i - 1) };
                                 matchEndedAtNode = tree.Match(tree.theRoot, edges, out found, out edgecursor);
                             }
                             else
@@ -587,55 +370,170 @@ namespace TextIndexing
 
                 tree.FixupLeaves(tree.theRoot, tree.Text.Length - 1);
                 return tree;
+            }            
+
+            #endregion
+
+            #region Private Methods
+
+            private int GetEdgeLength(IEdgeLabel e)
+            {
+                return (e.End != -1 ? e.End : this.CurrentPhase - 1) - e.Start + 1;
             }
 
-            /// <summary>
-            /// Determines whether [contains] [the specified text].
-            /// </summary>
-            /// <param name="text">The text.</param>
-            /// <returns>
-            ///   <c>true</c> if [contains] [the specified text]; otherwise, <c>false</c>.
-            /// </returns>
-            public bool Contains(string text)
+            private char GetCharFromIndex(int index)
             {
-                ISuffixNode found = null;
-                int firstUnmached = -1;
-                List<ISuffixNode> matchList = null;
-
-                int matchedOk = this.Search(text, ref matchList, out found, out firstUnmached);
-                return matchedOk == text.Length;
-            }
-
-            /// <summary>
-            /// Searches for specified text within the tree and returns the list of matching starting positions.
-            /// </summary>
-            /// <param name="text">The text.</param>
-            /// <param name="matchList">The match list.</param>
-            /// <returns></returns>
-            public bool Search(string text, out List<int> matchList)
-            {
-                matchList = null;
-
-                ISuffixNode found = null;
-                int firstUnmached = -1;
-                var matchNodeList = new List<ISuffixNode>();
-
-                int matchedOk = this.Search(text, ref matchNodeList, out found, out firstUnmached);
-
-                if (matchedOk == text.Length)
+                if (0 <= index && index < this.Text.Length)
                 {
-                    matchList = new List<int>();
-                    foreach (var n in matchNodeList)
+                    return this.Text[index];
+                }
+                else throw new ArgumentOutOfRangeException("index");
+            }
+
+            /// <summary>
+            /// pre-match routine
+            /// </summary>
+            /// <param name="p">node to start pre-matching from</param>
+            /// <param name="target">if method returns true, this value will be ignored; otherwise, upon return, it contains the node to start the next matching from</param>
+            /// <param name="edges">if method returns true, this will be ignored; otherwise, upon return, it contains the set of edges to be matched next, 
+            /// or null (if no further matching should be performed next</param>
+            /// <returns>true if the next match should be started from root node, false otherwise</returns>
+            private bool PreMatch(SuffixNode p, out SuffixNode target, out IEdgeLabel[] edges)
+            {
+                Debug.Assert(p != this.theRoot);
+
+                target = null;
+                edges = null;
+
+                bool goDownFromRoot = true;
+                var v = p.Parent;
+
+                if (p.Link != null)
+                {
+                    target = p.Link;
+                    edges = null;
+                    goDownFromRoot = false;
+                }
+                else if (v != this.theRoot)
+                {
+                    if (v.Link == null)
                     {
-                        matchList.Add(n.LeafNumber);
+                        var w = v.Parent;
+
+                        if (w != this.theRoot)
+                        {
+                            Debug.Assert(w.Link != null);
+
+                            edges = new EdgeLabel[2] {
+                                EdgeLabel.Create(v.Edge.Start, v.Edge.End == -1 ? (this.CurrentPhase - 1) : v.Edge.End),
+                                EdgeLabel.Create(p.Edge.Start, p.Edge.End == -1 ? (this.CurrentPhase - 1) : p.Edge.End)
+                            };
+
+                            target = w.Link;
+                            goDownFromRoot = false;
+                        }
+                    }
+                    else
+                    {
+                        Debug.Assert(v.Link != null);
+
+                        edges = new EdgeLabel[1]{
+                            EdgeLabel.Create(p.Edge.Start, p.Edge.End == -1 ? (this.CurrentPhase - 1) : p.Edge.End)
+                        };
+
+                        target = v.Link;
+                        goDownFromRoot = false;
+                    }
+                }
+
+                return goDownFromRoot;
+            }
+
+            /// <summary>
+            /// match routine
+            /// </summary>
+            /// <param name="node">node to start matching from</param>
+            /// <param name="edges">set of edges to be matched tree edges against</param>
+            /// <param name="childNode">on return should contain the node reached by the matching routing</param>
+            /// <param name="unmatchedEdgeCursor">if matching didn't finish at an internal node, it contains the first unmatched char index</param>
+            /// <returns>true if matching ended at node; false if matching finished inside an edge</returns>
+            private bool Match(SuffixNode node, IEdgeLabel[] edges, out SuffixNode childNode, out int unmatchedEdgeCursor)
+            {
+                if (node == null)
+                {
+                    throw new ArgumentNullException("parent");
+                }
+
+                if (edges == null || edges.Length <= 0)
+                {
+                    throw new ArgumentException("invalid argument", "edges");
+                }
+
+                unmatchedEdgeCursor = -1;
+                var matchingEdgeIndex = 0;
+                var matchingEdgeCursor = edges[matchingEdgeIndex].Start;
+                var matchingEdgeEnd = edges[matchingEdgeIndex].End;
+
+                childNode = this.TraverseEdge(node, matchingEdgeCursor);
+                var treeEdgeLength = this.GetEdgeLength(childNode.Edge);
+
+                do
+                {
+                    var diff = matchingEdgeEnd - matchingEdgeCursor + 1 - treeEdgeLength;
+
+                    if (diff > 0)
+                    {
+                        matchingEdgeCursor += treeEdgeLength;
+                    }
+                    else
+                    {
+                        if (++matchingEdgeIndex < edges.Length)
+                        {
+                            matchingEdgeCursor = edges[matchingEdgeIndex].Start;
+                            matchingEdgeEnd = edges[matchingEdgeIndex].End;
+                        }
+                        else
+                        {
+                            // nothing more to match .. 
+                            if (diff < 0) //unmatched = -diff
+                            {
+                                unmatchedEdgeCursor = (childNode.Edge.End == -1 ? (this.CurrentPhase - 1) : childNode.Edge.End) + diff + 1;
+                            }
+                            break;
+                        }
                     }
 
-                    return true;
-                }
-                else
+                    if (diff >= 0)
+                    {
+                        node = childNode;
+                        childNode = this.TraverseEdge(node, matchingEdgeCursor);
+                        treeEdgeLength = this.GetEdgeLength(childNode.Edge);
+                    }
+                } while (true);
+
+                return unmatchedEdgeCursor == -1;
+            }
+
+            private SuffixNode TraverseEdge(SuffixNode parent, int matchingStart)
+            {
+                SuffixNode child = parent.GetEdge(this.GetCharFromIndex(matchingStart));
+                if (child != null)
                 {
-                    return false;
+                    return child;
                 }
+                else throw new ArgumentException("invalid argument", "matchingStart");
+            }
+
+            private void FixupLeaves(SuffixNode p, int endIndex)
+            {
+                if (p.IsLeaf)
+                {
+                    p.Edge.End = endIndex;                    
+                }
+                else foreach (var child in p.Children)
+                {
+                    this.FixupLeaves(child.Value as SuffixNode, endIndex);
+                }                
             }
 
             #endregion
@@ -691,10 +589,7 @@ namespace TextIndexing
                     {
                         return (SuffixNode)child;
                     }
-                    else
-                    {
-                        return null;
-                    }
+                    else return null;                    
                 }
 
                 public SuffixNode AddEdge(string text, int startCharIndex, int endCharIndex)
@@ -761,7 +656,7 @@ namespace TextIndexing
             /// <summary>
             /// represents a text fragment (i.e. consecutive sequence of characters)
             /// </summary>
-            public class EdgeLabel : IEdgeLabel
+            private class EdgeLabel : IEdgeLabel
             {
                 public int Start 
                 { get; set; }
@@ -773,11 +668,125 @@ namespace TextIndexing
                 {
                     if (s < 0 || e < -1 || (e != -1 && s > e))
                     {
-                        throw new ArgumentOutOfRangeException();
+                        throw new ArgumentOutOfRangeException("s");
                     }
 
                     return new EdgeLabel() { Start = s, End = e };
                 }
+            }
+
+            #endregion
+        }
+
+        private class TextMatcher
+        {            
+            #region C'tor
+            
+            public TextMatcher(ISuffixTree suffixTree)
+            {
+                this.Tree = suffixTree;
+            }
+
+            #endregion
+
+            #region Properties
+
+            private ISuffixTree Tree { get; set; } 
+
+            #endregion
+
+            #region Public Methods
+
+            /// <summary>
+            /// Searches for the specified text.
+            /// </summary>
+            /// <param name="text">The text.</param>
+            /// <param name="matchingList">The matching list.</param>
+            /// <param name="child">The child.</param>
+            /// <param name="unmatchedEdgeCursor">First index of the unmached edge.</param>
+            /// <returns>number of characters successfully matched</returns>
+            public MatchResult Match(string text)
+            {
+                if (string.IsNullOrEmpty(text)){
+                    return null;
+                }
+
+                var matchResult = new MatchResult(){
+                    MatchedCount = 0,
+                    InternNode = null,
+                    UnmatchedEdgeCursor = -1,
+                    MatchingSuffixes = null,
+                };
+                
+                var parent = this.Tree.Root;
+                int length = text.Length;
+
+                int k = 0, edgeCursor = -1;
+                ISuffixNode child = null;
+
+                while (parent.Children.TryGetValue(text[k], out child))
+                {
+                    int edgeEnd = child.Edge.End;
+                    edgeCursor = child.Edge.Start;
+
+                    while (k < length && edgeCursor <= edgeEnd && text[k++] == this.Tree.Text[edgeCursor++]) { }
+
+                    if (k < length && edgeCursor > edgeEnd){                        
+                        parent = child;
+                    }
+                    else break;
+                }
+
+                if (k > 0)
+                {
+                    matchResult.InternNode = child;
+
+                    var agreedOnLastChar = text[k - 1] == this.Tree.Text[edgeCursor - 1];
+                    var stack = new Stack<ISuffixNode>();
+                    stack.Push(child);
+
+                    while (stack.Count > 0)
+                    {
+                        var p = stack.Pop();
+
+                        if (p.IsLeaf)
+                        {
+                            if (matchResult.MatchingSuffixes == null){
+                                matchResult.MatchingSuffixes = new List<ISuffixNode>();
+                            }
+                            
+                            matchResult.MatchingSuffixes.Add(p);                            
+                        }
+                        else foreach (var c in p.Children)
+                        {
+                            stack.Push(c.Value);
+                        }
+                    }
+
+                    if (!agreedOnLastChar)
+                    {
+                        matchResult.UnmatchedEdgeCursor = edgeCursor - 1;
+                        matchResult.MatchedCount = k - 1;
+                    }
+                    else
+                    {
+                        matchResult.MatchedCount = k;
+                    }
+                }
+
+                return matchResult;
+            }
+
+            #endregion
+
+            #region Nested Classes
+
+            public class MatchResult
+            {
+                public int MatchedCount { get; set; }
+                public List<ISuffixNode> MatchingSuffixes { get; set; }
+                public ISuffixNode InternNode { get; set; }
+                public int UnmatchedEdgeCursor { get; set; }
             }
 
             #endregion
@@ -788,10 +797,10 @@ namespace TextIndexing
 
     public static class SuffixTreeExtensions
     {
-        public static string GetNodeSuffix(this ISuffixTree t, ISuffixNode p)
+        public static string GetNodeSuffix(this ISuffixTree tree, ISuffixNode p)
         {
             var sb = new StringBuilder();
-            GetNodeSuffixImpl(t, p, sb);
+            GetNodeSuffixImpl(tree, p, sb);
             return sb.ToString();
         }
 
