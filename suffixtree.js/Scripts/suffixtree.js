@@ -1,6 +1,6 @@
 /////////////////////////////////////////////////////////////////////
 //      File Name          : suffixtree.js
-//      Created            : 28 8 2013   21:32
+//      Created            : 22 9 2013   20:20
 //      Author             : Costin S
 //
 /////////////////////////////////////////////////////////////////////
@@ -64,19 +64,6 @@ edgelabel = function(s, e){
 	}
 	this.start = s;
 	this.end = e;
-}
-
-stats = function () {
-    this.Is = {};
-    this.Ls = {};
-
-    this.addI = function (p, s) {
-        this.Is[s] = p;
-    }
-
-    this.addL = function (p, s) {
-        this.Ls[s] = p;
-    }
 }
 
 suffixtree = function () {
@@ -164,7 +151,7 @@ suffixtree = function () {
         return result;
     }
 
-    this.match = function (p, edges) {
+    this.match = function (node, edges) {
         var result = {
             matchEndedAtNode: undefined,
             found: undefined,
@@ -175,70 +162,45 @@ suffixtree = function () {
             throw "argument exception";
         }
 
-        var edgeCursor = -1;
-
-        var matchingToDo = 0;
-        for (var i = 0; i < edges.length; i++) {
-            matchingToDo += this.edgelength(edges[i]);
-        }
-
-        var matchingDone = 0;
-        var parent = p;
-
+        var unmatchedEdgeCursor = -1;
         var matchingEdgeIndex = 0;
-        var matchingEdge = edges[matchingEdgeIndex];
-        var cursorNext = matchingEdge.start;
-        var edgeEnd = matchingEdge.end;
+        var matchingEdgeCursor = edges[matchingEdgeIndex].start;
+        var matchingEdgeEnd = edges[matchingEdgeIndex].end;
 
-        var child = this.traverseedge(parent, cursorNext);
-        var treeEdgeLen = this.edgelength(child.edge);
+        var childNode = this.traverseedge(node, matchingEdgeCursor);
+        var treeEdgeLength = this.edgelength(childNode.edge);
 
         do {
-            if (cursorNext + treeEdgeLen - 1 < edgeEnd) {
-                matchingDone += treeEdgeLen;
-                cursorNext += treeEdgeLen;
+            var diff = matchingEdgeEnd - matchingEdgeCursor + 1 - treeEdgeLength;
 
-                if (matchingDone >= matchingToDo) {
-                    throw "unexpected!";
-                }
-
-                parent = child;
-                child = this.traverseedge(parent, cursorNext);
-                treeEdgeLen = this.edgelength(child.edge);
-            }
-            else if (cursorNext + treeEdgeLen - 1 == edgeEnd) {
-                matchingDone += treeEdgeLen;
-                if (matchingEdgeIndex + 1 < edges.length) {
-                    matchingEdge = edges[++matchingEdgeIndex];
-                    cursorNext = matchingEdge.start;
-                    edgeEnd = matchingEdge.end;
-
-                    parent = child;
-                    child = this.traverseedge(parent, cursorNext);
-                    treeEdgeLen = this.edgelength(child.edge);
-                }
+            if (diff > 0) {
+                matchingEdgeCursor += treeEdgeLength;
             }
             else {
-                matchingDone += edgeEnd - cursorNext + 1;
-                var deltaUnmatched = cursorNext + treeEdgeLen - 1 - edgeEnd;
-
-                if (matchingEdgeIndex + 1 < edges.length) {
-                    matchingEdge = edges[++matchingEdgeIndex];
-                    cursorNext = matchingEdge.start;
-                    edgeEnd = matchingEdge.end;
-
-                    treeEdgeLen = deltaUnmatched;
+                if (++matchingEdgeIndex < edges.length) {
+                    matchingEdgeCursor = edges[matchingEdgeIndex].start;
+                    matchingEdgeEnd = edges[matchingEdgeIndex].end;
                 }
                 else {
-                    edgeCursor = (child.edge.end == -1 ? (this.phase - 1) : child.edge.end) - deltaUnmatched + 1;
+                    // nothing more to match .. 
+                    if (diff < 0) //unmatched = -diff
+                    {
+                        unmatchedEdgeCursor = (childNode.edge.end == -1 ? (this.phase - 1) : childNode.edge.end) + diff + 1;
+                    }
+                    break;
                 }
             }
-        }
-        while (matchingDone < matchingToDo);
 
-        result.matchEndedAtNode = edgeCursor == -1,
-		result.found = child,
-		result.edgeCursor = edgeCursor
+            if (diff >= 0) {
+                node = childNode;
+                childNode = this.traverseedge(node, matchingEdgeCursor);
+                treeEdgeLength = this.edgelength(childNode.edge);
+            }
+        } while (true);
+
+        result.matchEndedAtNode = unmatchedEdgeCursor == -1;
+        result.found = childNode;
+        result.edgeCursor = unmatchedEdgeCursor;
 
         return result;
     }
@@ -261,182 +223,159 @@ suffixtree = function () {
             var skipRemaining = false;
             var internCreatedPrevExt = null;
 
-            for (var j = 1; j <= i && !skipRemaining; j++) {
-                if (j < lastCreatedLeaf) {
-                    continue;
+            var j = (lastCreatedLeaf == -1) ? 1 : lastCreatedLeaf;
+            for (; j < i && !skipRemaining; j++) 
+            {                
+                var edges = null;
+                var found = null;
+                var edgeCursor = -1;
+                var matchEndedAtNode;
+
+                // select the right node before start matching...
+                //
+                if (j == lastCreatedLeaf && j > 1) {
+                    if (!prevExtEnd.isleaf) {
+                        edges = new Array();
+                        edges[0] = new edgelabel(i - 1, i - 1);
+
+                        var result = this.match(prevExtEnd, edges);
+                        matchEndedAtNode = result.matchEndedAtNode;
+                        found = result.found;
+                        edgeCursor = result.edgeCursor;
+                    }
+                    else {
+                        found = prevExtEnd;
+                        matchEndedAtNode = true;
+                    }
                 }
 
-                if (j == i) {
-                    var parent = this.root;
-                    var child = parent.getedge(this.charfromindex(j));
+                // now let's do some matching .. if still necessary that is...
+                if (found == null) {
+                    var result = this.pre_match(prevExtEnd);
+                    var target = result.target;
+                    edges = result.edges;
 
-                    if (child == null) {
-                        var newLeaf = parent.addedge(this.text, i, -1);
-                        newLeaf.setleaf(j);
-                        lastCreatedLeaf = j;
-                        prevExtEnd = newLeaf;
+                    if (result.goDownFromRoot) {
+                        edges = new Array();
+                        edges[0] = new edgelabel(j, i - 1);
+
+                        var tmpresult = this.match(this.root, edges);
+                        matchEndedAtNode    = tmpresult.matchEndedAtNode;
+                        found               = tmpresult.found;                                                        
+                        edgeCursor          = tmpresult.edgeCursor;
                     }
-
-                    if (internCreatedPrevExt != null) {
-                        internCreatedPrevExt.link = parent;
-                        internCreatedPrevExt = null;
-                    }
-
-                    break;
-                }
-                else {
-                    var edges = null;
-                    var found = null;
-                    var edgeCursor = -1;
-                    var matchEndedAtNode;
-
-                    // select the right node before start matching...
-                    //
-                    if (j == lastCreatedLeaf && j > 1) {
-                        if (!prevExtEnd.isleaf) {
-                            edges = new Array();
-                            edges[0] = new edgelabel(i - 1, i - 1);
-
-                            var result = this.match(prevExtEnd, edges);
-                            matchEndedAtNode = result.matchEndedAtNode;
-                            found = result.found;
-                            edgeCursor = result.edgeCursor;
+                    else {
+                        if (edges != null) {
+                            var tmpresult = this.match(target, edges);
+                            matchEndedAtNode    = tmpresult.matchEndedAtNode;
+                            found               = tmpresult.found;
+                            edgeCursor          = tmpresult.edgeCursor
                         }
                         else {
-                            found = prevExtEnd;
+                            found = target;
                             matchEndedAtNode = true;
                         }
                     }
+                }
+                else {
+                    matchEndedAtNode = true;
+                }
 
-                    // now let's do some matching .. if still necessary that is...
-                    if (found == null) {
-                        var result = this.pre_match(prevExtEnd);
-                        var target = result.target;
-                        edges = result.edges;
-
-                        if (result.goDownFromRoot) {
-                            edges = new Array();
-                            edges[0] = new edgelabel(j, i - 1);
-
-                            var tmpresult = this.match(this.root, edges);
-                            matchEndedAtNode    = tmpresult.matchEndedAtNode;
-                            found               = tmpresult.found;                                                        
-                            edgeCursor          = tmpresult.edgeCursor;
-                        }
-                        else {
-                            if (edges != null) {
-                                var tmpresult = this.match(target, edges);
-                                matchEndedAtNode    = tmpresult.matchEndedAtNode;
-                                found               = tmpresult.found;
-                                edgeCursor          = tmpresult.edgeCursor
-                            }
-                            else {
-                                found = target;
-                                matchEndedAtNode = true;
-                            }
-                        }
+                // matching has finished, time for some housekeeping
+                if (!matchEndedAtNode) {
+                    if (this.text[edgeCursor] == this.text[i]) {
+                        skipRemaining = true;
+                        break;
                     }
                     else {
-                        matchEndedAtNode = true;
-                    }
+                        var foundParent = found.parent;
+                        var eStart = found.edge.start;
+                        var eEnd = found.isleaf ? i - 1 : found.edge.end;
+                        var eLength = eEnd - eStart + 1;
 
-                    // matching has finished, time for some housekeeping
-                    if (!matchEndedAtNode) {
-                        if (this.text[edgeCursor] == this.text[i]) {
-                            skipRemaining = true;
-                            break;
+                        foundParent.removeedge(this.charfromindex(eStart));
+
+                        var intern = new node();
+                        intern.edge = new edgelabel(eStart, edgeCursor - 1);
+                        intern.parent = foundParent;
+                        intern.link = null;
+
+                        foundParent.children[this.charfromindex(eStart)] = intern;
+
+                        found.parent = intern;
+                        found.edge.start = edgeCursor;
+
+                        intern.children[this.charfromindex(found.edge.start)] = found;
+
+                        if (internCreatedPrevExt != null) {
+                            internCreatedPrevExt.link = intern;
                         }
-                        else {
-                            var foundParent = found.parent;
-                            var eStart = found.edge.start;
-                            var eEnd = found.isleaf ? i - 1 : found.edge.end;
-                            var eLength = eEnd - eStart + 1;
+                        internCreatedPrevExt = intern;
 
-                            foundParent.removeedge(this.charfromindex(eStart));
+                        var newLeaf = intern.addedge(this.text, i, -1);
+                        newLeaf.setleaf(j);
+                        lastCreatedLeaf = j;
+                        prevExtEnd = intern;
+                    }
+                }
+                else {
+                    if (found.isleaf) {
+                        prevExtEnd = found;
+                    }
+                    else {
+                        if (internCreatedPrevExt != null) {
+                            internCreatedPrevExt.link = found;
+                        }
+                        internCreatedPrevExt = found.link == null ? found : null;
 
-                            var intern = new node();
-                            intern.edge = new edgelabel(eStart, edgeCursor - 1);
-                            intern.parent = foundParent;
-                            intern.link = null;
-
-                            foundParent.children[this.charfromindex(eStart)] = intern;
-
-                            found.parent = intern;
-                            found.edge.start = edgeCursor;
-
-                            intern.children[this.charfromindex(found.edge.start)] = found;
-
-                            if (internCreatedPrevExt != null) {
-                                internCreatedPrevExt.link = intern;
-                            }
-                            internCreatedPrevExt = intern;
-
-                            var newLeaf = intern.addedge(this.text, i, -1);
+                        if (found.getedge(this.charfromindex(i)) == null) {
+                            var newLeaf = found.addedge(this.text, i, -1);
                             newLeaf.setleaf(j);
                             lastCreatedLeaf = j;
-                            prevExtEnd = intern;
-                        }
-                    }
-                    else {
-                        if (found.isleaf) {
                             prevExtEnd = found;
                         }
                         else {
-                            if (internCreatedPrevExt != null) {
-                                internCreatedPrevExt.link = found;
-                            }
-                            internCreatedPrevExt = found.link == null ? found : null;
-
-                            if (found.getedge(this.charfromindex(i)) == null) {
-                                var newLeaf = found.addedge(this.text, i, -1);
-                                newLeaf.setleaf(j);
-                                lastCreatedLeaf = j;
-                                prevExtEnd = found;
-                            }
-                            else {
-                                skipRemaining = true;
-                                break;
-                            }
+                            skipRemaining = true;
+                            break;
                         }
                     }
                 }
             }
-        }
-    }
 
-    //quick n' dirty for display purposes..
-    //
-    this.parse = function (p, builder, s) {
-        if (!p.isleaf) {
-            if (p != this.root) {
-                s.addI(p, builder);
+            if (!skipRemaining) {
+                var parent = this.root;
+                var child = parent.getedge(this.charfromindex(j));
+
+                if (child == null) {
+                    var newLeaf = parent.addedge(this.text, i, -1);
+                    newLeaf.setleaf(j);
+                    lastCreatedLeaf = j;
+                    prevExtEnd = newLeaf;
+                }
+
+                if (internCreatedPrevExt != null) {
+                    internCreatedPrevExt.link = parent;
+                    internCreatedPrevExt = null;
+                }
             }
 
+        }
+
+        this.fixupleaves(this.root, this.text.length - 1);
+    }
+
+    this.fixupleaves = function (p, endindex){
+        if(p.isleaf) {
+            p.edge.end = endindex;
+        } else {
             var key;
-            for (key in p.children) {
+            for(key in p.children){
                 if (p.children.hasOwnProperty(key)) {
                     var child = p.children[key];
-                    var iBuilder = new String(builder);
-
-                    var length = (child.isleaf ? this.text.length - 1 : child.edge.end) - child.edge.start + 1;
-                    iBuilder = iBuilder.concat(this.text.substr(child.edge.start, length));
-
-                    this.parse(child, iBuilder, s);
+                    this.fixupleaves(child, endindex);
                 }
             }
         }
-        else {
-            s.addL(p, builder);
-        }
-    }
+    }    
 }
 
-printobject = function (obj) {
-    var size = 0, key;
-    for (key in obj) {
-        if (obj.hasOwnProperty(key)) {
-            console.log(key, " = ", obj[key].isleaf);
-            console.log("---------------");
-        }
-    }
-}
